@@ -1,0 +1,62 @@
+version: v0.4
+project:
+  name: Localized two-eigenvalue bound for finite noncomplete graphs
+  description: >-
+    For every finite noncomplete simple graph with at least two vertices,
+    the sum of the squares of its two largest ordered adjacency eigenvalues
+    is bounded by the sum over unordered edges of 2(1-1/c(e)), where c(e)
+    is the largest clique containing the edge. The proof establishes the
+    concrete edge-clique scalar certificate and transfers it through the
+    checked BN completely positive spectral lift. Connectedness is unnecessary.
+  authors: [Idris Ali Shaik]
+  responsible_maintainers: [Idris Ali Shaik]
+  license: Apache-2.0
+sources:
+  - title: Localization of spectral Turán-type theorems
+    type: paper
+    id: arXiv:2512.01409v2
+    location: https://arxiv.org/html/2512.01409v2
+    relationship: independently-proves
+    note: Conjecture 1.15, including its complete-graph exclusion.
+  - title: The Bollobás–Nikiforov inequality for nonnegative edge weights
+    type: other
+    location: https://github.com/ShengtongZhang-alt/BN/tree/5f4741254398424b730c9a893220a51e1cd829c5
+    relationship: adapts
+    contributors:
+      - name: Shengtong Zhang
+        role: Author of the reused BN Lean proof source.
+    note: >-
+      The BN proof modules are substantive extracted source at
+      5f4741254398424b730c9a893220a51e1cd829c5, ported to the selected toolchain.
+      The authoritative substantive source for these BN proof components is
+      ShengtongZhang-alt/BN at that source commit; the submission snapshot
+      also contains the separately hashed local edge-clique adapters.
+      The existing local edge-clique adapters supply the scalar localization.
+      Source copyright and Apache-2.0 notices are retained; no endorsement is claimed.
+classification:
+  arxiv: [math.CO]
+  msc2020: [05C50, 05C35]
+status:
+  scope: The finite noncomplete graph statement selected by comparator.json.
+  sorry_count: 0
+  sorry_in_definitions: 0
+  axioms: []
+automation:
+  methods:
+    - method: agent
+      models: [GPT-6 Codex]
+      framework: Codex
+      tool_setup: Local Lean proof adaptation, exact-pin replay, and axiom/dependency audits.
+  notes: >-
+    AI-assisted local formalization and toolchain port. The Solution proof cone
+    contains no sorry, native_decide, or custom axioms. Challenge has one
+    deliberate Comparator theorem hole.
+review:
+  status: Local Lean build and axiom audit; independent kernels and human expert review not performed.
+  reviewers: []
+fidelity:
+  divergences: >-
+    The theorem applies to all finite noncomplete graphs with at least two
+    vertices and hence includes KKP's connected convention. A linear order
+    enumerates each unordered edge once. No claim about Conjectures 1.16 or 1.17
+    is selected in this package.
