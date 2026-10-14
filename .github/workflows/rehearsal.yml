@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 jobs:
   preflight:
     name: Pinned Palomar preparation
@@ -18,16 +21,20 @@ jobs:
           path: pipeline
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        id: python
         with:
           python-version: '3.11.10'
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b
+        id: ruby
         with:
           ruby-version: '3.3.12'
           bundler-cache: true
           working-directory: pipeline
       - name: Install pinned verifier dependencies
+        id: dependencies
         run: python -m pip install --disable-pip-version-check --require-hashes --no-deps -r pipeline/requirements.txt
       - name: Prepare the exact source snapshot
+        id: prepare
         env:
           BUNDLE_GEMFILE: ${{ github.workspace }}/pipeline/Gemfile
           SOURCE_REPOSITORY: ${{ github.repository }}
@@ -51,16 +58,27 @@ jobs:
           python pipeline/scripts/verify_submission.py prepare \
             --event "$RUNNER_TEMP/inputs.json" --work-dir "$RUNNER_TEMP/palomar" \
             --output "$RUNNER_TEMP/preflight-report.json" --licensee "$(command -v bundle)"
-          python - <<'PY'
-          import json, os, pathlib
-          report = json.loads(pathlib.Path(os.environ['RUNNER_TEMP'], 'preflight-report.json').read_text())
-          assert report['status'] == 'pass', report
-          PY
+      - name: Finalize the preparation report
+        if: always()
+        env:
+          PALOMAR_STEPS: ${{ toJSON(steps) }}
+          PALOMAR_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          export PALOMAR_INPUTS="$(python -c 'import json,os,pathlib; print(json.dumps(json.loads(pathlib.Path(os.environ["RUNNER_TEMP"], "inputs.json").read_text())["inputs"]))')"
+          python pipeline/scripts/workflow_report.py finalize --report "$RUNNER_TEMP/preflight-report.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        id: upload1
         if: always()
         with:
           name: preflight-report
           path: ${{ runner.temp }}/preflight-report.json
+      - name: Apply the pinned preflight gate
+        if: always()
+        env:
+          PALOMAR_STEPS: ${{ toJSON(steps) }}
+        run: |
+          export PALOMAR_INPUTS="$(python -c 'import json,os,pathlib; print(json.dumps(json.loads(pathlib.Path(os.environ["RUNNER_TEMP"], "inputs.json").read_text())["inputs"]))')"
+          python pipeline/scripts/workflow_report.py gate --report "$RUNNER_TEMP/preflight-report.json"
   comparator:
     name: Linux build and bundled kernels
     runs-on: ubuntu-24.04
@@ -107,6 +125,10 @@ jobs:
           pathlib.Path('rehearsal-evidence/comparator.json').write_text(json.dumps(config, indent=2) + '\n')
           PY
           lake comparator --config rehearsal-evidence/comparator.json 2>&1 | tee rehearsal-evidence/comparator.log
+          if rg '^error:' rehearsal-evidence/comparator.log; then
+            echo 'Comparator reported an error; no proof verdict is accepted.'
+            exit 1
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
