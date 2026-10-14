@@ -40,7 +40,11 @@ jobs:
               'commit': os.environ['SOURCE_COMMIT'],
               'request_id': uuid.uuid4().hex[:12],
               'mode': 'preflight',
-              'options': json.dumps({'authorization_relationship': 'I am a responsible author or maintainer'}),
+              'options': json.dumps({
+                  'authorization_relationship': 'I am a responsible author or maintainer',
+                  'comparator_config_path': 'comparator.json',
+                  'formalization_metadata_path': 'formalization.yaml',
+              }),
           }
           pathlib.Path(os.environ['RUNNER_TEMP'], 'inputs.json').write_text(json.dumps({'inputs': inputs}))
           PY
