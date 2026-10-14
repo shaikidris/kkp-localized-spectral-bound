@@ -22,9 +22,9 @@ statement. `Solution.lean` exports `LocalBN.edgeLocalizedNoncompleteUnordered` f
 
 The source compiles locally with Lean 4.35.0-rc3 and Mathlib
 `dd56d02cb7a58fa066c4a2c7fddec3cbb59ae8df`. The theorem uses `propext`,
-`Classical.choice`, and `Quot.sound`. The supported bundled Comparator requires Linux;
-its invocation on this Mac returns exit 2 before comparison. Independent-kernel
-verification and the complete Palomar mechanical and rendering rehearsals have not run.
+`Classical.choice`, and `Quot.sound`. The supported bundled Comparator requires Linux.
+Commit-specific build, preparation, and independent-kernel verdicts are available
+in the GitHub Actions artifacts; a green wrapper alone is not proof evidence.
 The public source repository is
 <https://github.com/shaikidris/kkp-localized-spectral-bound>.
 Its GitHub rehearsal runs the pinned Palomar preparation entry point and a
