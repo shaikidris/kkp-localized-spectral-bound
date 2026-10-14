@@ -52,7 +52,7 @@ automation:
     contains no sorry, native_decide, or custom axioms. Challenge has one
     deliberate Comparator theorem hole.
 review:
-  status: Local Lean build and axiom audit; independent kernels and human expert review not performed.
+  status: Native Lean build and axiom audit; commit-specific mechanical evidence in GitHub Actions; human expert review not performed.
   reviewers: []
 fidelity:
   divergences: >-
