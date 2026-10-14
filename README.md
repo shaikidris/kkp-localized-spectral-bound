@@ -21,15 +21,17 @@ statement. `Solution.lean` exports `LocalBN.edgeLocalizedNoncompleteUnordered` f
 `Concrete.lean`. `SubmissionAudit.lean` audits its axioms and local dependency chain.
 
 The source compiles locally with Lean 4.35.0-rc3 and Mathlib
-`dd56d02cb7a58fa066c4a2c7fddec3cbb59ae8df`. The theorem uses `propext`,
+`c55e6e786f49471c72fbddbec5415808896aec1e`. The theorem uses `propext`,
 `Classical.choice`, and `Quot.sound`. The supported bundled Comparator requires Linux.
 Commit-specific build, preparation, and independent-kernel verdicts are available
 in the GitHub Actions artifacts; a green wrapper alone is not proof evidence.
 The public source repository is
 <https://github.com/shaikidris/kkp-localized-spectral-bound>.
 Its GitHub rehearsal runs the pinned Palomar preparation entry point and a
-sandboxed Linux Comparator with NanoDa and con-ron. This rehearsal is distinct
-from the full Palomar workflow, rendering, editorial review, and registration.
+sandboxed Linux Comparator with NanoDa and con-ron, followed by the pinned
+Challenge renderer. Full Palomar workflow and editorial/registration gates
+remain separate. The canonical Mathlib rc3 release shares the renderer's
+inherited dependency identities; no inherited revision is overridden.
 
 Commands from this directory:
 
