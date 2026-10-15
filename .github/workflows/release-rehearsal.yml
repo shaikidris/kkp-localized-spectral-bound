@@ -1,0 +1,338 @@
+name: Full proof and Challenge rendering rehearsal
+on:
+  push:
+    branches: [palomar-render-compatibility]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      repository: ${{ steps.guard.outputs.repository }}
+      commit: ${{ steps.guard.outputs.commit }}
+      pipeline: ${{ steps.guard.outputs.pipeline }}
+      request_id: ${{ steps.guard.outputs.request_id }}
+      render_request_id: ${{ steps.guard.outputs.render_request_id }}
+      options: ${{ steps.guard.outputs.options }}
+      challenge_sha256: ${{ steps.guard.outputs.challenge_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PalomarRegistry/PalomarSubmission
+          ref: d4e41c1d5b0d114c4859e6e5831dc6d3ad1d0d44
+          path: pipeline
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11.10"
+      - name: Install pinned parser and renderer dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes --no-deps -r pipeline/requirements.txt
+      - name: Bind immutable source and reject incompatible rendering dependencies
+        id: guard
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          PIPELINE_COMMIT: d4e41c1d5b0d114c4859e6e5831dc6d3ad1d0d44
+          BASELINE_COMMIT: 3d74cb4ed4dc2ec2a30fc24f020fe040030a7954
+        run: |
+          python -B - <<'PY'
+          import copy, hashlib, json, os, pathlib, subprocess, sys, tempfile, urllib.request, uuid
+          source = pathlib.Path("source").resolve()
+          pipeline = pathlib.Path("pipeline").resolve()
+          sys.path.insert(0, str(pipeline))
+          from scripts import submission_contract as contract
+          from scripts.render_challenge import merge_renderer_manifest, toolchain_verso_commit
+          from scripts.verify_submission import VerificationError
+          pin = os.environ["PIPELINE_COMMIT"]
+          commit = os.environ["SOURCE_COMMIT"]
+          def git(root, *args):
+              return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+          for root, expected in [(source, commit), (pipeline, pin)]:
+              assert git(root, "rev-parse", "HEAD") == expected, "stale source/pipeline binding"
+              assert not git(root, "status", "--porcelain", "--untracked-files=all"), "dirty checkout"
+          baseline = os.environ["BASELINE_COMMIT"]
+          assert not git(source, "diff", "--name-only", baseline, commit, "--", "*.lean"), "Lean source changed"
+          metadata_path = source / "formalization.yaml"
+          contract.load_formalization_metadata(metadata_path)
+          config = json.loads((source / "comparator.json").read_text())
+          assert set(config["permitted_axioms"]) == {"propext", "Quot.sound", "Classical.choice"}
+          options = json.dumps({"comparator_config_path": "comparator.json",
+                                "formalization_metadata_path": "formalization.yaml",
+                                "authorization_relationship": "I am a responsible author or maintainer"})
+          request_id = uuid.uuid4().hex[:12]
+          inputs = dict(repository=os.environ["SOURCE_REPOSITORY"], commit=commit,
+                        pipeline_commit=pin, request_id=request_id, mode="full",
+                        execution_profile="palomar-standard-v1", options=options)
+          values, parsed_id = contract.submission_request({"inputs": inputs})
+          assert parsed_id == request_id and values["commit_sha"] == commit
+          assert values["authorization_relationship"] in contract.AUTHORIZATION_RELATIONSHIPS
+          def rejected_request(change):
+              bad = copy.deepcopy(inputs)
+              bad.update(change)
+              try:
+                  result, _ = contract.submission_request({"inputs": bad})
+                  if result.get("authorization_relationship") not in contract.AUTHORIZATION_RELATIONSHIPS:
+                      return
+              except (ValueError, VerificationError):
+                  return
+              raise AssertionError("invalid request was accepted")
+          rejected_request({"request_id": "invalid-request"})
+          rejected_request({"options": json.dumps({"comparator_config_path": "comparator.json"})})
+          metadata = contract.load_formalization_metadata(metadata_path)
+          import yaml
+          for field in ["authors", "responsible_maintainers"]:
+              bad = copy.deepcopy(metadata)
+              bad["project"][field] = ["Researcher (ORCID 0009-0009-9699-9712)"]
+              with tempfile.TemporaryDirectory() as tmp:
+                  test_path = pathlib.Path(tmp) / "formalization.yaml"
+                  test_path.write_text(yaml.safe_dump(bad))
+                  try:
+                      contract.load_formalization_metadata(test_path)
+                  except (ValueError, VerificationError):
+                      pass
+                  else:
+                      raise AssertionError("embedded ORCID in name was accepted")
+          toolchain = (source / "lean-toolchain").read_text().strip()
+          verso_commit = toolchain_verso_commit(toolchain)
+          url = "https://raw.githubusercontent.com/leanprover/verso/" + verso_commit + "/lake-manifest.json"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              raw = response.read(1024 * 1024 + 1)
+          assert len(raw) <= 1024 * 1024, "oversized Verso manifest"
+          verso = json.loads(raw)
+          manifest = json.loads((source / "lake-manifest.json").read_text())
+          merged = merge_renderer_manifest(manifest, verso, verso_commit)
+          old_manifest = json.loads(git(source, "show", baseline + ":lake-manifest.json"))
+          try:
+              merge_renderer_manifest(old_manifest, verso, verso_commit)
+          except VerificationError as error:
+              assert "plausible" in str(error), str(error)
+              print("PASS regression: original submitted manifest reproduces the plausible conflict")
+          else:
+              raise AssertionError("baseline conflict regression unexpectedly passed")
+          challenge_hash = hashlib.sha256((source / "Challenge.lean").read_bytes()).hexdigest()
+          receipt = dict(status="pass", scope="request/metadata, immutable source and exact renderer manifest merge; no proof verdict",
+                         repository=os.environ["SOURCE_REPOSITORY"], commit=commit, pipeline_commit=pin,
+                         baseline_commit=baseline, lean_toolchain=toolchain, verso_commit=verso_commit,
+                         challenge_sha256=challenge_hash,
+                         manifest_sha256=hashlib.sha256((source / "lake-manifest.json").read_bytes()).hexdigest(),
+                         verso_manifest_sha256=hashlib.sha256(raw).hexdigest(),
+                         metadata_sha256=hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
+                         inputs=inputs)
+          pathlib.Path(os.environ["RUNNER_TEMP"], "release-guard.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for key, value in dict(repository=os.environ["SOURCE_REPOSITORY"], commit=commit,
+                                     pipeline=pin, request_id=request_id, render_request_id=uuid.uuid4().hex,
+                                     options=options, challenge_sha256=challenge_hash).items():
+                  output.write(f"{key}={value}\n")
+          print(json.dumps(receipt, indent=2))
+          print("PASS: strict request/metadata regressions, unchanged Lean source, exact manifest merge")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-guard
+          path: ${{ runner.temp }}/release-guard.json
+          if-no-files-found: error
+  lockfile:
+    needs: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.guard.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PalomarRegistry/PalomarSubmission
+          ref: d4e41c1d5b0d114c4859e6e5831dc6d3ad1d0d44
+          path: pipeline
+          persist-credentials: false
+      - name: Install pinned elan
+        run: |
+          python3 pipeline/scripts/trusted_download.py \
+            --url https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz" \
+            --sha256 df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2
+          mkdir "$RUNNER_TEMP/elan"
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP/elan"
+          "$RUNNER_TEMP/elan/elan-init" -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Regenerate this project's dependency closure with Lake
+        env:
+          MATHLIB_NO_CACHE_ON_UPDATE: "1"
+        run: |
+          cp lake-manifest.json "$RUNNER_TEMP/committed-lake-manifest.json"
+          lake update mathlib
+          python -B - <<'PY'
+          import json, os, pathlib
+          def canonical(path):
+              result = json.loads(path.read_text())
+              result["packages"] = sorted(result["packages"], key=lambda package: package["name"])
+              return result
+          before = canonical(pathlib.Path(os.environ["RUNNER_TEMP"], "committed-lake-manifest.json"))
+          after = canonical(pathlib.Path("lake-manifest.json"))
+          assert before == after, "Lake resolution differs from the committed dependency graph"
+          print("PASS: Lake regenerated the same complete project lockfile (format and package order ignored)")
+          PY
+          git diff --exit-code -- lakefile.toml lean-toolchain
+  verify:
+    needs: [guard, lockfile]
+    uses: PalomarRegistry/PalomarSubmission/.github/workflows/submission.yml@d4e41c1d5b0d114c4859e6e5831dc6d3ad1d0d44
+    with:
+      repository: ${{ needs.guard.outputs.repository }}
+      commit: ${{ needs.guard.outputs.commit }}
+      pipeline_commit: ${{ needs.guard.outputs.pipeline }}
+      request_id: ${{ needs.guard.outputs.request_id }}
+      mode: full
+      execution_profile: palomar-standard-v1
+      options: ${{ needs.guard.outputs.options }}
+
+  render:
+    needs: [guard, lockfile]
+    runs-on: ubuntu-24.04
+    env:
+      PALOMAR_EXECUTION_PROFILE: palomar-standard-v1
+    timeout-minutes: 75
+    steps:
+      - name: Validate request identifier
+        env:
+          REQUEST_ID: ${{ needs.guard.outputs.render_request_id }}
+        run: |
+          if [[ ! "$REQUEST_ID" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "request_id must be 32 lowercase hexadecimal characters" >&2
+            exit 2
+          fi
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Checkout trusted renderer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: PalomarRegistry/PalomarSubmission
+          ref: d4e41c1d5b0d114c4859e6e5831dc6d3ad1d0d44
+          path: pipeline
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11.10"
+
+      - name: Install verifier dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes --no-deps -r pipeline/requirements.txt
+
+      - name: Fetch and bind accepted source
+        id: prepare
+        working-directory: pipeline
+        env:
+          SOURCE_REPOSITORY: ${{ needs.guard.outputs.repository }}
+          SOURCE_COMMIT: ${{ needs.guard.outputs.commit }}
+          CHALLENGE_SHA256: ${{ needs.guard.outputs.challenge_sha256 }}
+          PROJECT_PATH: ""
+          CHALLENGE_PATH: Challenge.lean
+          SOLUTION_PATH: Solution.lean
+          COMPARATOR_CONFIG_PATH: comparator.json
+          LAKEFILE_PATH: lakefile.toml
+          LEAN_TOOLCHAIN_PATH: lean-toolchain
+        run: |
+          python -m scripts.render_challenge prepare \
+            --repository "$SOURCE_REPOSITORY" \
+            --commit "$SOURCE_COMMIT" \
+            --challenge-sha256 "$CHALLENGE_SHA256" \
+            --project-path "$PROJECT_PATH" \
+            --challenge-path "$CHALLENGE_PATH" \
+            --solution-path "$SOLUTION_PATH" \
+            --comparator-config-path "$COMPARATOR_CONFIG_PATH" \
+            --lakefile-path "$LAKEFILE_PATH" \
+            --lean-toolchain-path "$LEAN_TOOLCHAIN_PATH" \
+            --work-dir "$RUNNER_TEMP/palomar-render" \
+            --output "$RUNNER_TEMP/palomar-render/report.json"
+
+      - name: Install pinned elan
+        if: steps.prepare.outputs.ready == 'true'
+        run: |
+          python3 pipeline/scripts/trusted_download.py \
+            --url https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz" \
+            --sha256 df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2
+          mkdir "$RUNNER_TEMP/elan"
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP/elan"
+          "$RUNNER_TEMP/elan/elan-init" -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Install accepted Lean toolchain
+        if: steps.prepare.outputs.ready == 'true'
+        env:
+          LEAN_TOOLCHAIN: ${{ steps.prepare.outputs.lean_toolchain }}
+        run: elan toolchain install "$LEAN_TOOLCHAIN"
+
+      - name: Build pinned bubblewrap
+        if: steps.prepare.outputs.ready == 'true'
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq meson ninja-build libcap-dev pkg-config >/dev/null
+          echo "PALOMAR_BWRAP=$(pipeline/scripts/install_bwrap.sh "$RUNNER_TEMP/bwrap-bin")" >> "$GITHUB_ENV"
+
+      - name: Build, sanitize, and hash Challenge rendering under bubblewrap
+        if: steps.prepare.outputs.ready == 'true'
+        working-directory: pipeline
+        run: |
+          python -m scripts.render_challenge execute \
+            --work-dir "$RUNNER_TEMP/palomar-render" \
+            --output "$RUNNER_TEMP/palomar-render/report.json" \
+            --bwrap "$PALOMAR_BWRAP" \
+            --renderer-commit "d4e41c1d5b0d114c4859e6e5831dc6d3ad1d0d44" \
+            --bwrap-source-tag v0.12.0 \
+            --workflow-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Print bounded render receipt and selected prose
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "palomar-render/report.json"
+          if path.is_file():
+              report = json.loads(path.read_text())
+              print(json.dumps(report, ensure_ascii=False, indent=2))
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write("### Exact Challenge rendering report\n\n")
+                  summary.write("Candidate: \`" + str(report.get("commit", report.get("source", {}))) + "\`\n\n")
+                  summary.write("\`\`\`json\n" + json.dumps(report, ensure_ascii=False, indent=2) + "\n\`\`\`\n")
+          else:
+              print("No render report was produced")
+          PY
+
+      - name: Upload bounded render result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: challenge-render-${{ needs.guard.outputs.render_request_id }}
+          path: |
+            ${{ runner.temp }}/palomar-render/report.json
+            ${{ runner.temp }}/palomar-render/result
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require a successful render
+        if: always()
+        run: |
+          python -c 'import json, os, pathlib, sys; p = pathlib.Path(os.environ["RUNNER_TEMP"]) / "palomar-render" / "report.json"; sys.exit(0 if json.loads(p.read_text())["status"] == "pass" else 1)'
