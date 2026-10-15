@@ -18,6 +18,15 @@ sources:
     location: https://arxiv.org/html/2512.01409v2
     relationship: independently-proves
     note: Conjecture 1.15, including its complete-graph exclusion.
+  - title: A generalization of Turán's theorem
+    type: paper
+    id: arXiv:2205.08923
+    location: https://arxiv.org/abs/2205.08923
+    relationship: formalizes
+    authors: [Domagoj Bradač]
+    note: >-
+      Mathematical source for the edge-clique scalar argument implemented in
+      LocalCliques.lean and ScalarCertificate.lean.
   - title: The Bollobás–Nikiforov inequality for nonnegative edge weights
     type: other
     location: https://github.com/ShengtongZhang-alt/BN/tree/5f4741254398424b730c9a893220a51e1cd829c5
@@ -26,13 +35,12 @@ sources:
       - name: Shengtong Zhang
         role: Author of the reused BN Lean proof source.
     note: >-
-      The BN proof modules are substantive extracted source at
-      5f4741254398424b730c9a893220a51e1cd829c5, ported to the selected toolchain.
-      The authoritative substantive source for these BN proof components is
-      ShengtongZhang-alt/BN at that source commit; the submission snapshot
-      also contains the separately hashed local edge-clique adapters.
-      The existing local edge-clique adapters supply the scalar localization.
-      Source copyright and Apache-2.0 notices are retained; no endorsement is claimed.
+      The reused BN Lean proof modules are pinned at
+      5f4741254398424b730c9a893220a51e1cd829c5 and ported to the selected toolchain.
+      Transfer.lean uses BN's completely positive spectral lift.
+      LocalCliques.lean and ScalarCertificate.lean adapt Motzkin–Straus lemmas
+      from BN/MS/Basic.lean; Concrete.lean assembles the localized graph bound.
+      Source copyright and Apache-2.0 notices are retained.
 classification:
   arxiv: [math.CO]
   msc2020: [05C50, 05C35]
