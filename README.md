@@ -38,9 +38,13 @@ lake build Challenge Solution SubmissionAudit
 lake comparator --config comparator.json
 ```
 
-BN source and licence notices are retained. The local adapters are drawn from the
-existing edge-local project and ported into this isolated directory. See
-`SOURCE_PROVENANCE.md` for the roles of the exact source and dependency revisions.
+The scalar argument follows Domagoj Bradač, [*A generalization of Turán’s theorem*
+(2022)](https://arxiv.org/abs/2205.08923), with Motzkin–Straus lemmas adapted from
+Shengtong Zhang’s `BN/MS/Basic.lean`. The spectral transfer uses BN’s completely
+positive lift. The implementation is in `Transfer.lean`, `LocalCliques.lean`,
+`ScalarCertificate.lean`, and `Concrete.lean`; their roles and pinned source
+attributions are recorded in `SOURCE_PROVENANCE.md`. BN copyright and Apache-2.0
+notices are retained.
 
 The compatibility branch preserves the theorem and every Lean source file from
 `3d74cb4ed4dc2ec2a30fc24f020fe040030a7954`. It resolves the complete Mathlib dependency
